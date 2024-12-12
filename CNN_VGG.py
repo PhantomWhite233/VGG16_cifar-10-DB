@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms, models
 from tqdm import tqdm
 
@@ -16,8 +16,15 @@ transform = transforms.Compose([
 train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
 
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
+# 将训练集划分为训练集和验证集（80% 训练，20% 验证）
+train_size = int(0.8 * len(train_dataset))
+val_size = len(train_dataset) - train_size
+train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
+
+# 创建 DataLoader
+train_loader = DataLoader(train_subset, batch_size=64, shuffle=True)
+val_loader = DataLoader(val_subset, batch_size=256, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False)
 
 # 加载预训练的 VGG16 模型
 model = models.vgg16(pretrained=True)
@@ -36,6 +43,7 @@ model = model.to(device)
 # 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.classifier.parameters(), lr=0.001)  # 只优化全连接层的参数
+
 
 # 训练模型
 def train_model(model, train_loader, criterion, optimizer, epochs):
@@ -72,6 +80,36 @@ def train_model(model, train_loader, criterion, optimizer, epochs):
         # 输出训练结果
         print(f"Epoch [{epoch + 1}/{epochs}]:")
         print(f"\tTrain Loss: {train_loss:.3f} | Train Accuracy: {train_accuracy:.2f}%")
+
+        # 进行验证
+        val_loss, val_accuracy = validate_model(model, val_loader, criterion)
+        print(f"\tValidation Loss: {val_loss:.3f} | Validation Accuracy: {val_accuracy:.2f}%")
+
+
+# 验证模型
+def validate_model(model, val_loader, criterion):
+    model.eval()  # 切换到评估模式
+    running_loss_val = 0.0
+    correct_val = 0
+    total_val = 0
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+
+            running_loss_val += loss.item()
+
+            _, predicted = torch.max(outputs, 1)
+            correct_val += (predicted == labels).sum().item()
+            total_val += labels.size(0)
+
+    # 验证集损失与准确率
+    val_loss = running_loss_val / len(val_loader)
+    val_accuracy = 100 * correct_val / total_val
+
+    return val_loss, val_accuracy
+
 
 # 测试模型
 def test_model(model, test_loader, criterion):
